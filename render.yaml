@@ -1,0 +1,19 @@
+# Render 部署蓝图（Render Blueprint）
+# 用法：把本仓库推送到 GitHub，然后在 Render 里 New → Blueprint，选这个仓库即可一键部署
+services:
+  - type: web
+    name: dhd-booking-system
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/stats
+    disk:
+      name: dhd-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: NODE_ENV
+        value: production
