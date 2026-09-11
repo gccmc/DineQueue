@@ -1,0 +1,15 @@
+{
+  "name": "dhd-booking-system",
+  "version": "1.0.0",
+  "description": "预约平台 · 自助取号机 · 叫号大屏 · 后台",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}

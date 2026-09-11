@@ -1,0 +1,15 @@
+
+✅ 预约系统后端已启动
+   本机访问:   http://localhost:3000
+   预约平台:   http://localhost:3000/index.html
+   自助取号机: http://localhost:3000/kiosk.html
+   叫号大屏:   http://localhost:3000/display.html
+   后台管理:   http://localhost:3000/admin.html
+
+📡 局域网（店内设备）访问:
+   http://192.168.56.1:3000
+   http://192.168.101.1:3000
+   http://192.168.125.1:3000
+   http://192.168.10.171:3000
+   http://172.28.16.1:3000
+
