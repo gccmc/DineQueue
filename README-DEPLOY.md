@@ -27,7 +27,7 @@ git init
 git add .
 git commit -m "init"
 git branch -M main
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+git remote add origin https://github.com/gccmc/DineQueue.git
 git push -u origin main
 ```
 
@@ -39,7 +39,7 @@ git push -u origin main
 3. Render 会自动读取仓库里的 `render.yaml`，识别出 Web Service + 磁盘，点击 **Apply / Deploy**
 4. 等几分钟，部署完成后 Render 会给你一个公网域名（形如 `https://dhd-xxxx.onrender.com`）
 
-部署好后直接访问这个域名即可，**四个端共用同一个地址**：
+部署好后直接访问这个域名即可，**五端共用同一个地址**：
 
 | 页面 | 地址 |
 |---|---|
@@ -47,6 +47,7 @@ git push -u origin main
 | 自助取号机 | `你的域名/kiosk.html` |
 | 叫号大屏 | `你的域名/display.html` |
 | 后台管理 | `你的域名/admin.html` |
+| 到店确认台 | `你的域名/confirm.html` |
 
 #### 第 3 步（可选）绑定自定义域名
 Render 免费版也支持绑定自定义域名：Web Service → Settings → Custom Domain，填你买的域名并做 CNAME 解析。
@@ -89,4 +90,5 @@ node server.js
 - **数据库在哪 / 会不会丢**：云端在磁盘 `/data/data.db`，持久化，不会丢。
 - **大屏不实时刷新**：确认浏览器能访问到 socket.io（页面会自动连），网络正常即可。
 - **`better-sqlite3` 编译失败**：Render 的 Node 环境一般没问题；若失败，在部署页 Environment 里切换到 Node 18 LTS。
+- **确认机/取号机摄像头打不开**：局域网 HTTP 下浏览器会拦截摄像头。Windows 门店设备可双击运行项目根目录的 `confirm-machine.bat` 启动浏览器。
 - **后台/后台没有密码**：目前是开放访问。正式对外建议后续加一层登录校验（可告诉我帮你加上）。
