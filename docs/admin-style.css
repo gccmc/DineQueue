@@ -160,7 +160,6 @@ input[type="text"]:focus { border-color: #667eea; }
 .st-waiting { background: #eef0f6; color: #666; }
 .st-checked { background: #e3f2fd; color: #1976d2; }
 .st-called { background: #fff3e0; color: #f57c00; animation: pulse 1.2s infinite; }
-.st-arrived { background: #d2eee9; color: #0d7861; }
 .st-seated { background: #e8f5e9; color: #2e7d32; }
 .st-done { background: #e8f5e9; color: #2e7d32; }
 .st-passed { background: #fce4ec; color: #c2185b; }

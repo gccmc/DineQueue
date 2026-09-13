@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -42,9 +43,11 @@ function initDb() {
             children INTEGER NOT NULL DEFAULT 0,
             date TEXT NOT NULL,              -- YYYY-MM-DD
             username TEXT,                   -- 预约平台账号（线上产生时）
-            status TEXT NOT NULL DEFAULT 'waiting', -- waiting | checked | called | seated | done | passed | cancelled | expired
+            status TEXT NOT NULL DEFAULT 'waiting', -- waiting | checked | called | arrived | seated | done | passed | cancelled | expired
             tableNo TEXT,                    -- 分配的桌号（叫号时）
+            token TEXT,                      -- 每张票唯一的二维码秘钥
             calledAt INTEGER,                -- 叫号时间戳
+            arrivedAt INTEGER,               -- 顾客到店确认时间戳
             seatedAt INTEGER,                -- 就餐（入座）时间戳
             doneAt INTEGER,                  -- 完成时间戳
             checkedAt INTEGER,               -- 签到时间戳
@@ -80,6 +83,12 @@ function initDb() {
         db.exec(`ALTER TABLE tickets ADD COLUMN calledAt INTEGER;`);
     } catch (e) {}
     try {
+        db.exec(`ALTER TABLE tickets ADD COLUMN token TEXT;`);
+    } catch (e) {}
+    try {
+        db.exec(`ALTER TABLE tickets ADD COLUMN arrivedAt INTEGER;`);
+    } catch (e) {}
+    try {
         db.exec(`ALTER TABLE tickets ADD COLUMN seatedAt INTEGER;`);
     } catch (e) {}
     try {
@@ -102,6 +111,11 @@ const formatDateDisplay = (dateStr) => {
 
 function pad(num, len) {
     return String(num).padStart(len, '0');
+}
+
+// 每张票唯一的二维码秘钥（16位十六进制）
+function genToken() {
+    return crypto.randomBytes(8).toString('hex');
 }
 
 // 获取某个类型当天的下一个号码（自动按天重置）
@@ -175,17 +189,19 @@ app.get('/api/stats', (req, res) => {
 app.post('/api/bookings/time', (req, res) => {
     const { username, timeSlot, phoneTail, people, children, date } = req.body || {};
     // 同用户同日只能约一次
-    if (username) {
-        const dup = db.prepare("SELECT id FROM tickets WHERE username = ? AND date = ? AND type = 'time-booking' AND status != 'cancelled'")
+        if (username) {
+        // 只挡仍在"使用中"（waiting/checked/called/seated）的同名当日记录
+        // 已取消/已过号/已使用/已过期的都不挡，允许用户重新预约
+        const dup = db.prepare("SELECT id FROM tickets WHERE username = ? AND date = ? AND type = 'time-booking' AND status IN ('waiting','checked','called','seated')")
             .get(username, date);
-        if (dup) return res.status(400).json({ error: '该日期已经有时间预约了，每天只能预约一次' });
+        if (dup) return res.status(400).json({ error: '该日期已有进行中的预约，请先取消后再约' });
     }
     const number = getNextNumber('time-booking', MAX_TIME_BOOKING);
     if (number === null) return res.status(400).json({ error: '时间预约号码已达今日上限（9999）' });
     const nb = pad(number, 4);
-    const info = db.prepare(`INSERT INTO tickets (type, number, timeSlot, phoneTail, people, children, date, username, status, createdAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?)`).run(
-        'time-booking', nb, timeSlot, phoneTail, people, children, date, username || null, Date.now());
+    const info = db.prepare(`INSERT INTO tickets (type, number, timeSlot, phoneTail, people, children, date, username, status, token, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`).run(
+        'time-booking', nb, timeSlot, phoneTail, people, children, date, username || null, genToken(), Date.now());
     const booking = db.prepare('SELECT * FROM tickets WHERE id = ?').get(info.lastInsertRowid);
     pushUpdate();
     res.json({ booking, stats: getStat('time-booking', MAX_TIME_BOOKING) });
@@ -195,15 +211,16 @@ app.post('/api/bookings/time', (req, res) => {
 app.post('/api/bookings/queue', (req, res) => {
     const { username, phoneTail, people, children } = req.body || {};
     if (username) {
-        const active = db.prepare("SELECT * FROM tickets WHERE username = ? AND type = 'online-queue' AND date = ? AND status NOT IN ('cancelled','expired')").get(username, getToday());
-        if (active) return res.status(400).json({ error: `您还有活跃的线上取号（号码 ${active.number}）` });
+        // 只挡"还在排队中"的号，已完成/已过号/已取消/已过期的都不挡，允许重新取号
+        const active = db.prepare("SELECT * FROM tickets WHERE username = ? AND type = 'online-queue' AND date = ? AND status IN ('waiting','checked','called','seated')").get(username, getToday());
+        if (active) return res.status(400).json({ error: `您还有进行中的线上取号（号码 ${active.number}）` });
     }
     const number = getNextNumber('online-queue', MAX_ONLINE_QUEUE);
     if (number === null) return res.status(400).json({ error: '线上取号号码已达今日上限（999）' });
     const nb = pad(number, 3);
-    const info = db.prepare(`INSERT INTO tickets (type, number, phoneTail, people, children, date, username, status, createdAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?)`).run(
-        'online-queue', nb, phoneTail, people, children, getToday(), username || null, Date.now());
+    const info = db.prepare(`INSERT INTO tickets (type, number, phoneTail, people, children, date, username, status, token, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`).run(
+        'online-queue', nb, phoneTail, people, children, getToday(), username || null, genToken(), Date.now());
     const booking = db.prepare('SELECT * FROM tickets WHERE id = ?').get(info.lastInsertRowid);
     pushUpdate();
     res.json({ booking, stats: getStat('online-queue', MAX_ONLINE_QUEUE) });
@@ -216,9 +233,9 @@ app.post('/api/kiosk/take', (req, res) => {
     const number = getNextNumber('kiosk', MAX_ONLINE_QUEUE);
     if (number === null) return res.status(400).json({ error: '今日现场取号已达上限（999）' });
     const nb = pad(number, 3);
-    const info = db.prepare(`INSERT INTO tickets (type, number, phoneTail, people, children, date, username, status, createdAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?)`).run(
-        'kiosk', nb, pt, people, children, getToday(), null, Date.now());
+    const info = db.prepare(`INSERT INTO tickets (type, number, phoneTail, people, children, date, username, status, token, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`).run(
+        'kiosk', nb, pt, people, children, getToday(), null, genToken(), Date.now());
     const booking = db.prepare('SELECT * FROM tickets WHERE id = ?').get(info.lastInsertRowid);
     pushUpdate();
     res.json({ booking, stats: getStat('kiosk', MAX_ONLINE_QUEUE) });
@@ -230,21 +247,55 @@ app.get('/api/history/:username', (req, res) => {
     res.json(rows);
 });
 
+// ---- 查询某票前面还有几人（仅已签到的票才返回有效位置） ----
+app.get('/api/position/:id', (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const target = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+    if (!target) return res.status(404).json({ error: '记录不存在' });
+    if (target.date !== getToday()) return res.json({ ahead: 0, status: target.status, checked: false });
+    if (target.status !== 'checked') {
+        // 未签到：返回 0（让前端显示"未签到"）
+        return res.json({ ahead: 0, status: target.status, checked: false });
+    }
+    // 找出同日同 type 已签到 且号码比自己小的票数
+    const ahead = db.prepare(
+        `SELECT COUNT(*) AS c FROM tickets WHERE date = ? AND type = ? AND status = 'checked'
+         AND phoneTail IS NOT NULL AND phoneTail != ''
+         AND number < ?`
+    ).get(target.date, target.type, target.number).c;
+    res.json({ ahead, status: target.status, checked: true });
+});
+
 // ---- 签到：按号码牌核对（自助取号机） ----
-// 用号码牌查找当天存在的线上取号/时间预约记录
+// 用号码牌查找当天存在的预约/取号记录（含线上、时间预约、现场取号）
 app.get('/api/checkin/lookup', (req, res) => {
     const number = String(req.query.number || '').trim();
     if (!/^\d{3,4}$/.test(number)) return res.json({ found: false });
     const today = getToday();
+    // 号码可能在多个 type 间撞号（如线上 012 和现场 012）。
+    // 排序优先级：1)线上/时间预约且 waiting（可签到）  2)kiosk 且 waiting（现场取号等待中）  3)其他状态
     const row = db.prepare(
-        `SELECT * FROM tickets WHERE number = ? AND date = ? AND type IN ('online-queue','time-booking') AND status NOT IN ('cancelled','expired')`
+        `SELECT * FROM tickets WHERE number = ? AND date = ? AND type IN ('online-queue','time-booking','kiosk')
+         ORDER BY
+            CASE
+                WHEN type IN ('online-queue','time-booking') AND status = 'waiting' THEN 0
+                WHEN type = 'kiosk' AND status = 'waiting' THEN 1
+                ELSE 2
+            END,
+            id DESC
+         LIMIT 1`
     ).get(number, today);
     if (!row) return res.json({ found: false });
-    // 已经签到过
-    if (row.status === 'checked') {
-        return res.json({ found: true, checked: true, booking: row });
+    // 现场取号(kiosk)不需要签到，取号即进队列等叫号
+    if (row.type === 'kiosk') {
+        return res.json({ found: true, checkable: false, status: 'kiosk', booking: row });
     }
-    res.json({ found: true, checked: false, booking: row });
+    // 只有 waiting 状态才允许走签到流程
+    if (row.status === 'waiting') {
+        return res.json({ found: true, checkable: true, booking: row });
+    }
+    // 其他状态：返回 found + 当前状态，前端给不同提示
+    return res.json({ found: true, checkable: false, status: row.status, booking: row });
 });
 
 // ---- 签到：二步手机尾号核验 ----
@@ -252,6 +303,16 @@ app.post('/api/checkin/verify', (req, res) => {
     const { id, phoneTail } = req.body || {};
     const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: '记录不存在' });
+    // 状态校验：只有 waiting 状态允许走签到流程
+    if (['cancelled', 'expired'].includes(row.status)) {
+        return res.status(400).json({ verified: false, error: '该号码已失效' });
+    }
+    if (['checked', 'called', 'arrived', 'seated', 'done', 'passed'].includes(row.status)) {
+        return res.status(400).json({ verified: false, error: '该号码已使用，无法再次签到' });
+    }
+    if (row.status !== 'waiting') {
+        return res.status(400).json({ verified: false, error: '该号码当前不允许签到' });
+    }
     if (String(row.phoneTail) !== String(phoneTail).trim()) {
         return res.json({ verified: false });
     }
@@ -263,11 +324,49 @@ app.post('/api/checkin/confirm', (req, res) => {
     const { id } = req.body || {};
     const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: '记录不存在' });
-    if (row.status === 'cancelled' || row.status === 'expired') return res.status(400).json({ error: '该号码已失效' });
+    if (row.status === 'cancelled' || row.status === 'expired') {
+        return res.status(400).json({ error: '该号码已失效' });
+    }
+    if (['checked', 'called', 'arrived', 'seated', 'done', 'passed'].includes(row.status)) {
+        return res.status(400).json({ error: '该号码已使用，无法再次签到' });
+    }
+    if (row.status !== 'waiting') {
+        return res.status(400).json({ error: '该号码当前状态不允许签到' });
+    }
     db.prepare("UPDATE tickets SET status = 'checked', checkedAt = ? WHERE id = ?").run(Date.now(), id);
     const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     pushUpdate();
     res.json({ booking: updated });
+});
+
+// ---- 签到：扫码签到（自助取号机扫顾客手机上的到店码） ----
+app.post('/api/checkin/scan', (req, res) => {
+    const p = parseTicketPayload((req.body || {}).payload);
+    if (!p) return res.status(400).json({ error: '二维码无效' });
+    const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(p.id);
+    if (!row || !row.token || row.token !== p.token) {
+        return res.status(400).json({ error: '二维码无效' });
+    }
+    if (row.type === 'kiosk') {
+        return res.status(400).json({ error: '现场取号无需签到，请直接等候叫号' });
+    }
+    if (row.status === 'cancelled' || row.status === 'expired') {
+        return res.status(400).json({ error: '该号码已失效' });
+    }
+    if (['checked', 'called', 'arrived', 'seated', 'done', 'passed'].includes(row.status)) {
+        const map = {
+            checked: '该号码已签到', called: '该号码已被叫号', arrived: '该号码已到店',
+            seated: '该号码正在就餐', done: '该号码已就餐完成', passed: '该号码已过号'
+        };
+        return res.status(400).json({ error: map[row.status] || '该号码已使用' });
+    }
+    if (row.status !== 'waiting') {
+        return res.status(400).json({ error: '该号码当前不允许签到' });
+    }
+    db.prepare("UPDATE tickets SET status = 'checked', checkedAt = ? WHERE id = ?").run(Date.now(), p.id);
+    const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(p.id);
+    pushUpdate();
+    res.json({ ok: true, booking: updated });
 });
 
 app.get('/api/bookings/:id', (req, res) => {
@@ -281,10 +380,127 @@ app.post('/api/bookings/:id/cancel', (req, res) => {
     const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: '记录不存在' });
     if (row.status === 'cancelled') return res.status(400).json({ error: '该号码已取消' });
-    if (row.status === 'checked' || row.status === 'called' || row.status === 'seated' || row.status === 'done' || row.status === 'passed' || row.status === 'expired') {
+    if (row.status === 'checked' || row.status === 'called' || row.status === 'arrived' || row.status === 'seated' || row.status === 'done' || row.status === 'passed' || row.status === 'expired') {
         return res.status(400).json({ error: '该号码已使用或已过期，无法取消' });
     }
     db.prepare("UPDATE tickets SET status = 'cancelled', cancelledAt = ? WHERE id = ?").run(Date.now(), row.id);
+    const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(row.id);
+    pushUpdate();
+    res.json({ booking: updated });
+});
+
+// ================= 二维码 / 确认机接口 =================
+// 对外返回给确认机显示的票信息（屏蔽 token、不泄露手机尾号）
+function publicTicket(t) {
+    if (!t) return null;
+    return {
+        id: t.id,
+        type: t.type,
+        number: t.number,
+        timeSlot: t.timeSlot || null,
+        phoneTail: t.phoneTail ? ('****' + t.phoneTail) : '',
+        people: t.people,
+        children: t.children,
+        date: t.date,
+        status: t.status,
+        tableNo: t.tableNo || '',
+        username: t.username || null
+    };
+}
+
+// 解析二维码内嵌内容 DHD:<id>:<token>
+function parseTicketPayload(payload) {
+    const m = /^DHD:(\d+):([0-9a-f]{16})$/.exec(String(payload || '').trim());
+    return m ? { id: parseInt(m[1], 10), token: m[2] } : null;
+}
+
+// 二维码内容（给各端生成二维码用）
+app.get('/api/ticket/qr/:id', (req, res) => {
+    const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
+    if (!row || !row.token) return res.status(404).json({ error: '记录不存在' });
+    res.json({ payload: `DHD:${row.id}:${row.token}` });
+});
+
+// 现场取号绑定到预约平台账号：扫码(id+token) 或 手动(号码+手机尾号)
+app.post('/api/ticket/bind', (req, res) => {
+    const { id, token, username, number, phoneTail } = req.body || {};
+    if (!username) return res.status(400).json({ error: '请先登录预约平台' });
+    let row = null;
+    if (id && token) {
+        row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+        if (!row || !row.token || row.token !== String(token).trim()) {
+            return res.status(400).json({ error: '二维码无效，请重新扫描' });
+        }
+    } else if (number && phoneTail) {
+        row = db.prepare(
+            `SELECT * FROM tickets WHERE number = ? AND date = ? AND phoneTail = ? AND username IS NULL
+             ORDER BY id DESC LIMIT 1`
+        ).get(String(number).trim(), getToday(), String(phoneTail).trim());
+        if (!row) return res.status(400).json({ error: '找不到可绑定的号码，请确认号码与手机尾号' });
+    } else {
+        return res.status(400).json({ error: '缺少绑定信息' });
+    }
+    if (row.username && row.username !== username) {
+        return res.status(400).json({ error: '该号码已绑定其他账号' });
+    }
+    db.prepare('UPDATE tickets SET username = ? WHERE id = ?').run(username, row.id);
+    const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(row.id);
+    pushUpdate();
+    res.json({ booking: updated });
+});
+
+// 确认机：解析扫码（DHD:id:token）
+app.post('/api/confirm/resolve', (req, res) => {
+    const p = parseTicketPayload((req.body || {}).payload);
+    if (!p) return res.json({ ok: false, error: '二维码无效' });
+    const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(p.id);
+    if (!row || !row.token || row.token !== p.token) return res.json({ ok: false, error: '二维码无效' });
+    res.json({ ok: true, booking: publicTicket(row) });
+});
+
+// 确认机：手动输入号码查找
+app.post('/api/confirm/lookup', (req, res) => {
+    const n = String((req.body || {}).number || '').trim();
+    if (!/^\d{3,4}$/.test(n)) return res.json({ ok: false, error: '请输入3-4位号码牌' });
+    const row = db.prepare(
+        `SELECT * FROM tickets WHERE number = ? AND date = ? AND type IN ('online-queue','time-booking','kiosk')
+         ORDER BY
+            CASE status
+                WHEN 'called' THEN 0
+                WHEN 'arrived' THEN 1
+                WHEN 'seated' THEN 2
+                WHEN 'done' THEN 3
+                ELSE 4
+            END,
+            id DESC
+         LIMIT 1`
+    ).get(n, getToday());
+    if (!row) return res.json({ ok: false, error: '今天没有这个号码，请核对后重试' });
+    res.json({ ok: true, booking: publicTicket(row) });
+});
+
+// 确认机：确认到店（status: called → arrived）
+app.post('/api/confirm/arrive', (req, res) => {
+    const { id, token } = req.body || {};
+    const row = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: '记录不存在' });
+    if (row.token && token && row.token !== String(token).trim()) {
+        return res.status(400).json({ error: '二维码不匹配' });
+    }
+    if (row.status !== 'called') {
+        const map = {
+            arrived: '该号码已确认到店',
+            seated: '该号码已在就餐中',
+            done: '该号码已完成就餐',
+            passed: '该号码已过号',
+            waiting: '该号码还未被叫到，请耐心等候',
+            checked: '该号码还未被叫到，请耐心等候',
+            cancelled: '该号码已取消',
+            expired: '该号码已失效'
+        };
+        return res.status(400).json({ error: map[row.status] || '当前状态无法确认' });
+    }
+    db.prepare("UPDATE tickets SET status = 'arrived', arrivedAt = ? WHERE id = ?").run(Date.now(), row.id);
     const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(row.id);
     pushUpdate();
     res.json({ booking: updated });
@@ -348,15 +564,33 @@ app.post('/api/admin/call', (req, res) => {
         target = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
         if (!target) return res.status(404).json({ error: '记录不存在' });
         if (target.date !== today) return res.status(400).json({ error: '只能叫今天的号码' });
-        if (target.status !== 'waiting' && target.status !== 'checked' && target.status !== 'passed') {
+        // 手动指定 id：可以叫 waiting/checked/passed（管理员强制）
+        if (!['waiting', 'checked', 'passed'].includes(target.status)) {
             return res.status(400).json({ error: '该号码当前无法叫号' });
         }
     } else {
+        // 自动叫下一号：按"入队时间"统一排序（先来先服务）
+        // - 现场取号(kiosk)：取号即入队，按 createdAt
+        // - 线上取号/时间预约(online-queue/time-booking)：签到即入队，按 checkedAt
+        //   即使号码小，后签到也排后面
         target = db.prepare(
-            `SELECT * FROM tickets WHERE date = ? AND status IN ('waiting','checked','passed')
-             ORDER BY createdAt ASC LIMIT 1`
+            `SELECT * FROM tickets WHERE date = ? AND (
+                (type = 'kiosk' AND status = 'waiting')
+                OR
+                (type IN ('online-queue','time-booking') AND status = 'checked'
+                 AND phoneTail IS NOT NULL AND phoneTail != ''
+                 AND checkedAt IS NOT NULL)
+             )
+             ORDER BY
+                CASE
+                    WHEN type = 'kiosk' THEN createdAt
+                    ELSE checkedAt
+                END ASC
+             LIMIT 1`
         ).get(today);
-        if (!target) return res.status(400).json({ error: '当前没有可叫的号码' });
+        if (!target) {
+            return res.status(400).json({ error: '当前没有可叫的号码（线上需先到店签到）' });
+        }
     }
     const auto = getSetting('autoAssignTable', false);
     const table = auto ? pickTableId(tableNo || '') : (tableNo || '');
@@ -385,7 +619,7 @@ app.post('/api/admin/seat', (req, res) => {
     const { id } = req.body || {};
     const booking = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     if (!booking) return res.status(404).json({ error: '记录不存在' });
-    if (booking.status !== 'called') return res.status(400).json({ error: '只有已叫号的号码才能入座' });
+    if (booking.status !== 'called' && booking.status !== 'arrived') return res.status(400).json({ error: '只有已叫号或已到店的号码才能入座' });
     db.prepare("UPDATE tickets SET status = 'seated', seatedAt = ? WHERE id = ?").run(Date.now(), id);
     const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     pushUpdate();
@@ -397,7 +631,7 @@ app.post('/api/admin/done', (req, res) => {
     const { id } = req.body || {};
     const booking = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     if (!booking) return res.status(404).json({ error: '记录不存在' });
-    if (booking.status !== 'seated' && booking.status !== 'called') return res.status(400).json({ error: '该号码当前状态无法完结' });
+    if (booking.status !== 'seated' && booking.status !== 'called' && booking.status !== 'arrived') return res.status(400).json({ error: '该号码当前状态无法完结' });
     db.prepare("UPDATE tickets SET status = 'done', doneAt = ? WHERE id = ?").run(Date.now(), id);
     const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
     pushUpdate();
@@ -423,13 +657,14 @@ function getActiveQueue() {
     const today = getToday();
     const rows = db.prepare(
         `SELECT * FROM tickets
-         WHERE date = ? AND status IN ('waiting','checked','called','seated')
+         WHERE date = ? AND status IN ('waiting','checked','called','arrived','seated')
          ORDER BY
             CASE status
                 WHEN 'seated' THEN 0
-                WHEN 'called' THEN 1
-                WHEN 'checked' THEN 2
-                WHEN 'waiting' THEN 3
+                WHEN 'arrived' THEN 1
+                WHEN 'called' THEN 2
+                WHEN 'checked' THEN 3
+                WHEN 'waiting' THEN 4
             END,
             createdAt ASC`
     ).all(today);
@@ -465,9 +700,56 @@ io.on('connection', () => {
     pushUpdate();
 });
 
+// ---------- LAN IP 信息（公网/局域网访问用）----------
+app.get('/api/lan-info', (req, res) => {
+    const ifs = os.networkInterfaces();
+    const ipv4 = [];
+    const ipv6 = [];
+    for (const name of Object.keys(ifs)) {
+        for (const i of ifs[name]) {
+            if (i.internal) continue;
+            if (i.family === 'IPv4') ipv4.push(i.address);
+            else if (i.family === 'IPv6') ipv6.push(i.address);
+        }
+    }
+    // 找本机的全局 IPv6（公网 IPv6 通常是 240x/200x 开头）
+    const myPublicIPv6 = ipv6.find(ip => !ip.startsWith('fe80:') && !ip.startsWith('fd') && !ip.startsWith('::1')) || null;
+    res.json({
+        port: PORT,
+        ipv4: ipv4.filter(ip => !ip.startsWith('169.254.')),  // 过滤 link-local
+        ipv6: ipv6.filter(ip => !ip.startsWith('fe80:')),     // 只保留全局 IPv6
+        publicIPv4: null,  // 运营商未分配
+        publicIPv6: myPublicIPv6
+    });
+});
+
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-    console.log(`✅ 预约系统后端已启动: http://localhost:${PORT}`);
-    console.log(`   预约平台: http://localhost:${PORT}/index.html`);
+function getLocalIPs() {
+    const ifs = os.networkInterfaces();
+    const out = [];
+    for (const name of Object.keys(ifs)) {
+        for (const i of ifs[name]) {
+            if (i.family === 'IPv4' && !i.internal) out.push(i.address);
+        }
+    }
+    return out;
+}
+httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n✅ 预约系统后端已启动`);
+    console.log(`   本机访问:   http://localhost:${PORT}`);
+    console.log(`   预约平台:   http://localhost:${PORT}/index.html`);
     console.log(`   自助取号机: http://localhost:${PORT}/kiosk.html`);
+    console.log(`   叫号大屏:   http://localhost:${PORT}/display.html`);
+    console.log(`   后台管理:   http://localhost:${PORT}/admin.html`);
+    console.log(`   到店确认台: http://localhost:${PORT}/confirm.html`);
+    const ips = getLocalIPs();
+    if (ips.length) {
+        console.log(`\n📡 局域网（店内设备）访问:`);
+        for (const ip of ips) {
+            console.log(`   http://${ip}:${PORT}`);
+        }
+    } else {
+        console.log(`\n⚠️  未检测到局域网网卡，请检查 WiFi/有线是否已连接`);
+    }
+    console.log('');
 });

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -12,7 +12,6 @@
             <h1>📋 预约系统</h1>
             <div class="user-bar" id="user-bar" style="display:none;">
                 <span class="user-name" id="current-user-name"></span>
-                <button class="scan-btn" onclick="openScanner()">📷 扫一扫绑定</button>
                 <button class="logout-btn" onclick="logout()">退出</button>
             </div>
         </header>
@@ -286,12 +285,6 @@
                                 <span class="info-value table-no" id="ticket-table"></span>
                             </div>
                         </div>
-                        <div class="ticket-qr-area" id="ticket-qr-area" style="display:none;">
-                            <div class="qr-frame">
-                                <canvas id="ticket-qr"></canvas>
-                            </div>
-                            <div class="qr-tip">🎯 叫到您的号时，到店确认机扫此码确认到店</div>
-                        </div>
                         <div class="ticket-footer">请凭此号码牌到店使用</div>
                     </div>
                     <div class="result-actions" id="result-actions-btns">
@@ -306,73 +299,9 @@
 
     <div id="toast" class="toast"></div>
 
-    <!-- 扫一扫绑定取号机号码 -->
-    <div id="scan-overlay" class="scan-overlay">
-        <div class="scan-box">
-            <div class="scan-head">
-                <h3>📷 扫一扫绑定取号机号码</h3>
-                <button class="scan-close" onclick="closeScanner()">✕</button>
-            </div>
-
-            <div id="scan-camera-mode">
-                <div class="scan-camera-wrap">
-                    <video id="scan-video" playsinline muted></video>
-                    <canvas id="scan-canvas" style="display:none;"></canvas>
-                    <div class="scan-frame"></div>
-                </div>
-                <div class="scan-camera-status" id="scan-camera-status">正在启动摄像头…</div>
-                <div class="scan-camera-error" id="scan-camera-error" style="display:none;">
-                    无法打开摄像头（需在 https 或本机 localhost 环境）。<br>请改用下方"手动输入"绑定。
-                </div>
-                <div class="scan-switch">
-                    <span class="link" onclick="showScanMode('manual')">手动输入号码绑定</span>
-                </div>
-            </div>
-
-            <div id="scan-manual-mode" style="display:none;">
-                <div class="scan-manual-form">
-                    <p class="scan-manual-hint">适用于现场取号后，输入取号机显示的号码与当时填的手机尾号</p>
-                    <div class="form-group">
-                        <label>号码牌</label>
-                        <input type="text" id="bind-number" maxlength="4" placeholder="例如 012" oninput="this.value=this.value.replace(/\D/g,'')">
-                    </div>
-                    <div class="form-group">
-                        <label>手机尾号（取号时填写的4位）</label>
-                        <input type="text" id="bind-phone" maxlength="4" placeholder="后四位" oninput="this.value=this.value.replace(/\D/g,'')">
-                    </div>
-                    <button class="submit-btn full" onclick="submitManualBind()">确认绑定</button>
-                    <div class="scan-switch">
-                        <span class="link" onclick="showScanMode('camera')">← 返回扫码</span>
-                    </div>
-                </div>
-            </div>
-
-            <div id="scan-result" style="display:none;">
-                <div class="scan-result-inner">
-                    <div class="scan-result-icon">✅</div>
-                    <h3>绑定成功！</h3>
-                    <p>号码牌 <b id="scan-result-num" class="scan-result-num"></b> 已绑定到当前账号</p>
-                    <p class="scan-manual-hint">可在"我的取号"中查看并出示此号码的到店二维码</p>
-                    <button class="submit-btn full" onclick="closeScanner()">完成</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="ip-banner" class="ip-banner minimized collapsed" title="点击展开/收起">
-        <div class="ip-banner-head" onclick="toggleIpBanner()">
-            <span class="ip-banner-icon">📡</span>
-            <span class="ip-banner-title">访问地址</span>
-            <span class="ip-banner-toggle" id="ip-banner-toggle">▶</span>
-        </div>
-        <div class="ip-banner-body" id="ip-banner-body">
-            <div id="ip-modal-list"></div>
-        </div>
-    </div>
-
-    <script src="vendor/qrcode.js"></script>
-    <script src="vendor/jsQR.js"></script>
     <script src="app.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="demo.js"></script>
 </body>
 </html>
+
+

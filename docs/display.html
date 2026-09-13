@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -22,22 +22,11 @@
                 <div class="hero-active" id="hero-active"></div>
             </section>
 
-            <!-- 下一位 -->
-            <section class="next-section">
-                <div class="next-label">下一位</div>
-                <div class="next-grid" id="next-grid">
-                    <div class="next-empty">暂无</div>
-                </div>
-            </section>
-
-            <!-- 待叫队列 -->
-            <section class="queue">
-                <div class="queue-head">
-                    <span class="queue-title">待叫队列</span>
-                    <span class="queue-stat" id="queue-stat">共 0 位</span>
-                </div>
-                <div class="queue-grid" id="queue-grid">
-                    <div class="queue-empty">暂无等待</div>
+            <!-- 最近叫号列表 -->
+            <section class="recent">
+                <div class="recent-title">最近叫号</div>
+                <div class="recent-list" id="recent-list">
+                    <div class="recent-empty">暂无叫号记录</div>
                 </div>
             </section>
         </main>
@@ -46,6 +35,7 @@
     </div>
 
     <script src="display.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="demo.js"></script>
 </body>
 </html>
+

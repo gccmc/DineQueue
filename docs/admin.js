@@ -33,7 +33,6 @@ const STATUS_MAP = {
     waiting: { text: '等待中', cls: 'st-waiting' },
     checked: { text: '已签到', cls: 'st-checked' },
     called: { text: '🔊 叫号中', cls: 'st-called' },
-    arrived: { text: '📍 已到店', cls: 'st-arrived' },
     seated: { text: '🍽️ 就餐中', cls: 'st-seated' },
     done: { text: '✅ 已完成', cls: 'st-done' },
     passed: { text: '↩️ 已过号', cls: 'st-passed' },
@@ -55,7 +54,7 @@ function renderQueue() {
     const listEl = document.getElementById('queue-list');
     const emptyEl = document.getElementById('queue-empty');
     const countEl = document.getElementById('queue-count');
-    const active = queueData.filter(b => ['waiting','checked','called','arrived','seated'].includes(b.status));
+    const active = queueData.filter(b => ['waiting','checked','called','seated'].includes(b.status));
     countEl.textContent = active.length + ' 位';
 
     if (queueData.length === 0) {
@@ -100,14 +99,10 @@ function renderQueue() {
             actions += `<button class="op op-recall" onclick="recallOne(${b.id})">重呼</button>`;
             actions += `<button class="op op-seat" onclick="seatOne(${b.id})">入座</button>`;
         }
-        if (b.status === 'arrived') {
-            actions += `<button class="op op-seat" onclick="seatOne(${b.id})">入座</button>`;
-            actions += `<button class="op op-done" onclick="doneOne(${b.id})">完成</button>`;
-        }
         if (b.status === 'waiting' || b.status === 'checked' || b.status === 'called') {
             actions += `<button class="op op-cancel" onclick="cancelOne(${b.id})">取消</button>`;
         }
-        if (b.status === 'seated' || b.status === 'called' || b.status === 'arrived') {
+        if (b.status === 'seated' || b.status === 'called') {
             actions += `<button class="op op-done" onclick="doneOne(${b.id})">完成</button>`;
         }
 

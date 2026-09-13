@@ -76,145 +76,6 @@ function formatDateDisplay(dateStr) {
 
 function validatePhoneTail(phoneTail) { return /^\d{4}$/.test(phoneTail); }
 
-// ---------- 二维码：解析 / 生成 ----------
-function parseQrPayload(payload) {
-    const m = /^DHD:(\d+):([0-9a-f]{16})$/.exec(String(payload || '').trim());
-    return m ? { id: parseInt(m[1], 10), token: m[2] } : null;
-}
-// 用 qrcode-generator 把内容画到 canvas
-function renderTicketQr(canvasEl, booking) {
-    if (!window.qrcode || !canvasEl || !booking) return false;
-    if (!booking.token || typeof booking.id === 'undefined') return false;
-    const payload = `DHD:${booking.id}:${booking.token}`;
-    const qr = qrcode(0, 'M');
-    qr.addData(payload);
-    qr.make();
-    const scale = 4;
-    const size = qr.getModuleCount() * scale;
-    if (canvasEl.width !== size) { canvasEl.width = size; canvasEl.height = size; }
-    canvasEl.style.width = '180px';
-    canvasEl.style.height = '180px';
-    const ctx = canvasEl.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, size, size);
-    qr.renderTo2dContext(ctx, scale);
-    return true;
-}
-
-// ---------- 扫一扫绑定（预约平台） ----------
-let _scanStream = null;
-let _scanRaf = null;
-let _scanLock = false;
-function openScanner() {
-    if (!requireLogin()) return;
-    document.getElementById('scan-overlay').classList.add('open');
-    document.getElementById('scan-result').style.display = 'none';
-    showScanMode('camera');
-}
-function closeScanner() {
-    stopScanCamera();
-    document.getElementById('scan-overlay').classList.remove('open');
-}
-function showScanMode(mode) {
-    document.getElementById('scan-camera-mode').style.display = mode === 'camera' ? 'block' : 'none';
-    document.getElementById('scan-manual-mode').style.display = mode === 'manual' ? 'block' : 'none';
-    if (mode === 'camera') startScanCamera();
-    else stopScanCamera();
-}
-async function startScanCamera() {
-    const video = document.getElementById('scan-video');
-    if (!video || !window.jsQR) { showScanError(); return; }
-    stopScanCamera();
-    _scanLock = false;
-    document.getElementById('scan-camera-status').textContent = '正在启动摄像头…';
-    // 电脑上通常没有后置摄像头，依次回退：environment → user → 默认
-    const constraints = [
-        { video: { facingMode: { exact: 'environment' } } },
-        { video: { facingMode: 'environment' } },
-        { video: { facingMode: { exact: 'user' } } },
-        { video: { facingMode: 'user' } },
-        { video: true }
-    ];
-    for (const c of constraints) {
-        try {
-            _scanStream = await navigator.mediaDevices.getUserMedia(c);
-            video.srcObject = _scanStream;
-            await video.play();
-            document.getElementById('scan-camera-status').textContent = '📷 请将取号机上的二维码对准摄像头';
-            document.getElementById('scan-camera-error').style.display = 'none';
-            tickScanCamera();
-            return;
-        } catch (e) {}
-    }
-    showScanError();
-}
-function showScanError() {
-    document.getElementById('scan-camera-status').textContent = '';
-    document.getElementById('scan-camera-error').style.display = 'block';
-}
-function stopScanCamera() {
-    if (_scanRaf) { cancelAnimationFrame(_scanRaf); _scanRaf = null; }
-    if (_scanStream) { _scanStream.getTracks().forEach(t => t.stop()); _scanStream = null; }
-    const video = document.getElementById('scan-video');
-    if (video) video.srcObject = null;
-}
-function tickScanCamera() {
-    const video = document.getElementById('scan-video');
-    const cvs = document.getElementById('scan-canvas');
-    if (!video || video.readyState < 2 || video.videoWidth === 0) {
-        _scanRaf = requestAnimationFrame(tickScanCamera);
-        return;
-    }
-    const w = video.videoWidth, h = video.videoHeight;
-    cvs.width = w; cvs.height = h;
-    const ctx = cvs.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(video, 0, 0, w, h);
-    const img = ctx.getImageData(0, 0, w, h);
-    const code = window.jsQR(img.data, w, h);
-    if (code && code.data && !_scanLock) {
-        _scanLock = true;
-        handleScanResult(code.data);
-        return;
-    }
-    _scanRaf = requestAnimationFrame(tickScanCamera);
-}
-async function handleScanResult(payload) {
-    stopScanCamera();
-    const p = parseQrPayload(payload);
-    if (!p) { showScanError(); _scanLock = false; return; }
-    const res = await api('/ticket/bind', {
-        method: 'POST',
-        body: { id: p.id, token: p.token, username: currentUser }
-    });
-    if (!res.ok) {
-        document.getElementById('scan-camera-status').textContent = res.error || '绑定失败，请重试';
-        _scanLock = false;
-        startScanCamera();
-        return;
-    }
-    document.getElementById('scan-camera-mode').style.display = 'none';
-    const sr = document.getElementById('scan-result');
-    sr.style.display = 'block';
-    document.getElementById('scan-result-num').textContent = res.booking.number;
-    if (currentUser) renderHistory();
-}
-async function submitManualBind() {
-    const number = document.getElementById('bind-number').value.trim();
-    const phoneTail = document.getElementById('bind-phone').value.trim();
-    if (!/^\d{3,4}$/.test(number)) { showToast('请输入号码牌号码', 'error'); return; }
-    if (!/^\d{4}$/.test(phoneTail)) { showToast('请输入取号时填写的手机尾号', 'error'); return; }
-    const res = await api('/ticket/bind', {
-        method: 'POST',
-        body: { number, phoneTail, username: currentUser }
-    });
-    if (!res.ok) { showToast(res.error || '绑定失败', 'error'); return; }
-    showToast(`已绑定号码 ${res.booking.number}`, 'success');
-    document.getElementById('bind-number').value = '';
-    document.getElementById('bind-phone').value = '';
-    closeScanner();
-    renderHistory();
-}
-
 // ---------- 用户 ----------
 function setCurrentUser(username) {
     currentUser = username;
@@ -321,7 +182,6 @@ function deriveStatus(booking) {
     if (booking.status === 'cancelled') return 'cancelled';
     // 餐厅叫号/就餐状态：直接透传叫号中/就餐中/已完成/已过号
     if (booking.status === 'called') return 'called';
-    if (booking.status === 'arrived') return 'arrived';
     if (booking.status === 'seated') return 'seated';
     if (booking.status === 'done') return 'done';
     if (booking.status === 'passed') return 'passed';
@@ -337,7 +197,6 @@ const STATUS_TEXT = {
     waiting: '⏳ 待叫号',
     checked: '✅ 已签到',
     called: '🔊 叫号中',
-    arrived: '📍 已到店',
     seated: '🍽️ 就餐中',
     done: '✅ 就餐完成',
     passed: '↩️ 已过号',
@@ -349,7 +208,6 @@ function tagClass(st) {
         waiting: 'waiting-tag',
         checked: 'active-tag',
         called: 'called-tag',
-        arrived: 'arrived-tag',
         seated: 'seated-tag',
         done: 'done-tag',
         passed: 'passed-tag',
@@ -405,13 +263,13 @@ function resetForms() {
 
 // ---------- 日期与时间段 ----------
 async function loadBookedDates() {
-    // 返回当前用户"使用中"的日期集合（已取消/已过号/已使用/已过期的不算）
+    // 返回当前用户已预约的日期集合
     if (!currentUser) return [];
     const res = await api('/history/' + encodeURIComponent(currentUser));
     if (!res.ok) return [];
     if (!Array.isArray(res.list)) return [];
     return new Set(
-        res.list.filter(b => b.type === 'time-booking' && ['waiting', 'checked', 'called', 'seated'].includes(b.status))
+        res.list.filter(b => b.type === 'time-booking' && b.status !== 'cancelled')
             .map(b => b.date)
     );
 }
@@ -437,7 +295,7 @@ async function generateDateTabs() {
 
         el.onclick = () => {
             if (booked.has(d.key)) {
-                showToast(`${d.label}（${d.sub}）已有进行中的预约，请先取消后再约`, 'error');
+                showToast(`${d.label}（${d.sub}）已经预约过了，每天只能预约一次`, 'error');
                 return;
             }
             selectedBookingDate = d.key;
@@ -585,7 +443,7 @@ function showResult(booking) {
         checkinVal.textContent = STATUS_TEXT[st] || STATUS_TEXT.waiting;
         const colorMap = {
             cancelled: '#d83838', expired: '#999', passed: '#c2185b',
-            called: '#f57c00', arrived: '#0d7861', seated: '#2e7d32', done: '#24a148',
+            called: '#f57c00', seated: '#2e7d32', done: '#24a148',
             checked: '#24a148', waiting: '#b58100'
         };
         checkinVal.style.color = colorMap[st] || '#333';
@@ -601,18 +459,6 @@ function showResult(booking) {
         tableVal.textContent = '🪑 ' + booking.tableNo;
     } else if (tableRow) {
         tableRow.style.display = 'none';
-    }
-
-    // 到店确认二维码（在确认机扫码用）
-    const qrArea = document.getElementById('ticket-qr-area');
-    const qrCanvas = document.getElementById('ticket-qr');
-    const showQr = !!booking.token && ['waiting', 'checked', 'called', 'arrived', 'seated'].includes(st);
-    if (qrArea) {
-        if (showQr && renderTicketQr(qrCanvas, booking)) {
-            qrArea.style.display = 'block';
-        } else {
-            qrArea.style.display = 'none';
-        }
     }
 
     document.getElementById('ticket-phone').textContent = `****${booking.phoneTail}`;
@@ -660,8 +506,7 @@ async function renderHistory() {
     emptyEl.style.display = 'none';
     listEl.innerHTML = '';
 
-    // 并发查每条记录的"前面剩余人数"（仅已签到有效）
-    const items = await Promise.all(bookings.map(async (booking) => {
+    bookings.forEach(booking => {
         const isTimeBooking = booking.type === 'time-booking';
         const isToday = booking.date === today;
         const st = deriveStatus(booking);
@@ -675,7 +520,10 @@ async function renderHistory() {
         else if (isActive) cardClass += ' active';
         else cardClass += ' expired';
 
+        // 状态标签：优先显示餐厅叫号状态
         const statusTag = `<span class="status-tag ${tagClass(st)}">${STATUS_TEXT[st] || STATUS_TEXT.waiting}</span>`;
+
+        // 可取消：仅待叫号/待签到时可取消
         const canCancel = (st === 'waiting' || st === 'checked') && !isCancelled;
         const cancelBtnHtml = canCancel
             ? `<div class="history-card-foot">
@@ -683,32 +531,6 @@ async function renderHistory() {
                </div>`
             : '';
 
-        // 前面剩余人数
-        let aheadHtml = '';
-        if (st === 'checked' && isToday) {
-            const pos = await api('/position/' + booking.id);
-            if (pos && pos.ok !== false && pos.checked) {
-                aheadHtml = `<div class="info-row ahead-row">
-                    <span class="info-label">📍 排队位置</span>
-                    <span class="info-value ahead-num">前面还有 <b>${pos.ahead}</b> 位</span>
-                </div>`;
-            } else {
-                aheadHtml = `<div class="info-row ahead-row">
-                    <span class="info-label">📍 排队位置</span>
-                    <span class="info-value ahead-num muted">⚠️ 尚未签到</span>
-                </div>`;
-            }
-        } else if (st === 'waiting' && isToday) {
-            aheadHtml = `<div class="info-row ahead-row">
-                <span class="info-label">📍 排队位置</span>
-                <span class="info-value ahead-num muted">⚠️ 尚未签到，到店签到后才显示位置</span>
-            </div>`;
-        }
-
-        return { booking, isTimeBooking, isToday, st, isCancelled, cardClass, statusTag, cancelBtnHtml, aheadHtml };
-    }));
-
-    items.forEach(({ booking, isTimeBooking, isToday, st, isCancelled, cardClass, statusTag, cancelBtnHtml, aheadHtml }) => {
         const card = document.createElement('div');
         card.className = cardClass;
         card.onclick = () => showResult(booking);
@@ -723,7 +545,6 @@ async function renderHistory() {
             <div class="history-body">
                 <div class="history-number ${isTimeBooking ? 'num-4' : 'num-3'} ${isCancelled ? 'strike' : ''}">${booking.number}</div>
                 <div class="history-details">
-                    ${aheadHtml}
                     <div class="info-row">
                         <span class="info-label">日期</span>
                         <span class="info-value">${formatDateDisplay(booking.date)}</span>
@@ -769,108 +590,6 @@ function updateLiveCall(queue) {
     document.getElementById('live-call-table').textContent = cur.tableNo ? `→ ${cur.tableNo}` : '→ 请到服务台';
 }
 
-// ---------- 局域网/公网 IP 横幅 ----------
-function isMobileDevice() {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(navigator.userAgent)
-        || (window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
-}
-// 默认展开/收起策略：手机默认收起，电脑默认展开。用户可手动切换并记忆
-function applyBannerState() {
-    const banner = document.getElementById('ip-banner');
-    if (!banner) return;
-    const userPref = sessionStorage.getItem('ipBannerPref'); // 'min' / 'max' / null
-    let minimized;
-    if (userPref === 'min') minimized = true;
-    else if (userPref === 'max') minimized = false;
-    else minimized = isMobileDevice(); // 没记忆则按设备
-    banner.classList.toggle('minimized', minimized);
-    if (minimized) {
-        // 隐藏展开态
-        banner.classList.add('collapsed');
-        // 改标题为简短
-        const title = banner.querySelector('.ip-banner-title');
-        if (title) title.textContent = '访问地址';
-    } else {
-        banner.classList.remove('collapsed');
-        const title = banner.querySelector('.ip-banner-title');
-        if (title) title.textContent = '本机访问地址（家人扫码/输入访问）';
-    }
-}
-function toggleIpBanner() {
-    const banner = document.getElementById('ip-banner');
-    if (!banner) return;
-    // 当前如果是 minimized 或 collapsed，点击展开；否则收起
-    const wasMinimized = banner.classList.contains('minimized');
-    const wasCollapsed = banner.classList.contains('collapsed');
-    if (wasMinimized || wasCollapsed) {
-        banner.classList.remove('minimized');
-        banner.classList.remove('collapsed');
-        const title = banner.querySelector('.ip-banner-title');
-        if (title) title.textContent = '本机访问地址（家人扫码/输入访问）';
-        sessionStorage.setItem('ipBannerPref', 'max');
-    } else {
-        banner.classList.add('minimized');
-        const title = banner.querySelector('.ip-banner-title');
-        if (title) title.textContent = '访问地址';
-        sessionStorage.setItem('ipBannerPref', 'min');
-    }
-}
-async function initIpBanner() {
-    const banner = document.getElementById('ip-banner');
-    if (!banner) return;
-    // 把 inline onclick 换成绑定好的 toggle（兼容旧）
-    const head = banner.querySelector('.ip-banner-head');
-    if (head) {
-        head.onclick = toggleIpBanner;
-    }
-    applyBannerState();
-    try {
-        const data = await api('/lan-info');
-        if (!data || !data.port) { banner.style.display = 'none'; return; }
-        renderIpList(data);
-    } catch (e) {
-        banner.style.display = 'none';
-    }
-}
-function renderIpList(data) {
-    const list = document.getElementById('ip-modal-list');
-    if (!list) return;
-    list.innerHTML = '';
-    const groups = [];
-    if (data.ipv4 && data.ipv4.length) groups.push({ title: '🏠 局域网（同一 WiFi）', items: data.ipv4 });
-    if (data.ipv6 && data.ipv6.length) groups.push({ title: '📶 手机流量访问（IPv6）', items: data.ipv6 });
-    if (data.publicIPv4) groups.push({ title: '🌍 公网 IPv4', items: [data.publicIPv4] });
-    if (data.publicIPv6) groups.push({ title: '🌍 公网 IPv6', items: [data.publicIPv6] });
-    for (const g of groups) {
-        const wrap = document.createElement('div');
-        wrap.className = 'ip-group';
-        wrap.innerHTML = '<div class="ip-group-title">' + g.title + '</div>';
-        for (const ip of g.items) {
-            const isV6 = ip.indexOf(':') >= 0;
-            const url = isV6 ? ('http://[' + ip + ']:' + data.port + '/') : ('http://' + ip + ':' + data.port + '/');
-            const row = document.createElement('div');
-            row.className = 'ip-item';
-            row.innerHTML = '<div class="ip-item-text"><div class="ip-item-text-host">' + ip + '</div><div class="ip-item-text-url">' + url + '</div></div><button data-url="' + url + '">复制</button>';
-            const btn = row.querySelector('button');
-            btn.onclick = function(e) {
-                const u = e.target.dataset.url;
-                if (navigator.clipboard) {
-                    navigator.clipboard.writeText(u).then(function() {
-                        e.target.textContent = '✓已复制';
-                        setTimeout(function() { e.target.textContent = '复制'; }, 1500);
-                    });
-                } else { prompt('复制此地址：', u); }
-            };
-            wrap.appendChild(row);
-        }
-        list.appendChild(wrap);
-    }
-    const base = (data.ipv4 && data.ipv4[0]) ? ('http://' + data.ipv4[0] + ':' + data.port) : ('http://localhost:' + data.port);
-    const endpoints = document.createElement('div');
-    endpoints.className = 'endpoints';
-    endpoints.innerHTML = '<strong>📱 五个端点（替换地址前缀即可）</strong><br>预约平台: ' + base + '/<br>取号机: ' + base + '/kiosk.html<br>叫号大屏: ' + base + '/display.html<br>后台管理: ' + base + '/admin.html<br>到店确认台: ' + base + '/confirm.html';
-    list.appendChild(endpoints);
-}
 function initSocket() {
     if (typeof io === 'undefined') return;
     const socket = io();
@@ -898,5 +617,4 @@ document.addEventListener('DOMContentLoaded', function() {
     if (restoreLogin()) navigateTo('home');
     else navigateTo('login');
     initSocket();
-    initIpBanner();
 });

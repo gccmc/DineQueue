@@ -11,22 +11,8 @@ function getAuthToken() {
 
 // ---------- 页面切换 ----------
 function goScreen(name) {
-    // 每次切换页面都重置进入页的状态，避免看到上次的残留
-    if (name === 'checkin') {
-        // 进入签到：默认直接启动扫码签到
-        cancelAutoHome();
-        stopScanCheckin();
-        currentBooking = null;
-        resetCheckinInternal();
-        openScanCheckin();
-    } else if (name === 'take') {
-        // 进入取号：取消可能残留的倒计时 + 重置取号表单
-        cancelAutoHome();
-        resetTake();
-    } else {
-        // 回首页或其他：清签到输入
-        resetCheckinInternal();
-    }
+    // 非签到页时重置签到状态
+    if (name !== 'checkin') resetCheckinInternal();
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     const el = document.getElementById('screen-' + name);
     if (el) el.classList.add('active');
@@ -37,40 +23,6 @@ function goStep(stepId) {
     document.querySelectorAll('.checkin-step').forEach(s => s.classList.remove('active'));
     const el = document.getElementById('step-' + stepId);
     if (el) el.classList.add('active');
-    // 签到成功 / 失败时启动倒计时
-    if (stepId === 'done') startAutoHomeCountdown('done', 5);
-    if (stepId === 'finished') startAutoHomeCountdown('finished', 8);
-}
-
-// ---------- 自动返回首页倒计时 ----------
-let _autoHomeTimer = null;
-let _autoHomeInterval = null;
-function cancelAutoHome() {
-    if (_autoHomeTimer) { clearTimeout(_autoHomeTimer); _autoHomeTimer = null; }
-    if (_autoHomeInterval) { clearInterval(_autoHomeInterval); _autoHomeInterval = null; }
-}
-function startAutoHomeCountdown(tag, seconds) {
-    cancelAutoHome();
-    const tipEl = document.getElementById('auto-home-tip-' + tag);
-    const countEl = document.getElementById('auto-home-count-' + tag);
-    if (!tipEl || !countEl) return;
-    tipEl.style.display = 'block';
-    let left = seconds;
-    countEl.textContent = left;
-    _autoHomeInterval = setInterval(() => {
-        left--;
-        if (left <= 0) { clearInterval(_autoHomeInterval); _autoHomeInterval = null; return; }
-        countEl.textContent = left;
-    }, 1000);
-    _autoHomeTimer = setTimeout(() => {
-        cancelAutoHome();
-        goScreen('home');
-    }, seconds * 1000);
-}
-// 取号成功后启动倒计时
-function showTakeResultAndCountdown() {
-    document.getElementById('take-result').style.display = 'flex';
-    startAutoHomeCountdown('take', 10);
 }
 
 function resetCheckin() {
@@ -85,89 +37,6 @@ function resetCheckinInternal() {
     const phone = document.getElementById('checkin-phone');
     if (num) num.value = '';
     if (phone) phone.value = '';
-}
-
-// ---------- 扫码签到 ----------
-let _scanStream = null, _scanRaf = null, _scanLock = false;
-
-function openScanCheckin() {
-    goStep('scan');
-    document.getElementById('scan-status').textContent = '正在启动摄像头…';
-    document.getElementById('scan-error').style.display = 'none';
-    startScanCamera();
-}
-function stopScanCheckin() {
-    if (_scanRaf) { cancelAnimationFrame(_scanRaf); _scanRaf = null; }
-    if (_scanStream) { _scanStream.getTracks().forEach(t => t.stop()); _scanStream = null; }
-    const video = document.getElementById('scan-video');
-    if (video) video.srcObject = null;
-    _scanLock = false;
-}
-async function startScanCamera() {
-    const video = document.getElementById('scan-video');
-    if (!video || !window.jsQR) { failScanCamera(); return; }
-    stopScanCheckin();
-    _scanLock = false;
-    const constraints = [
-        { video: { facingMode: { exact: 'environment' } } },
-        { video: { facingMode: 'environment' } },
-        { video: { facingMode: { exact: 'user' } } },
-        { video: { facingMode: 'user' } },
-        { video: true }
-    ];
-    for (const c of constraints) {
-        try {
-            _scanStream = await navigator.mediaDevices.getUserMedia(c);
-            video.srcObject = _scanStream;
-            await video.play();
-            document.getElementById('scan-status').textContent = '📷 请将手机上的「到店码」对准镜头';
-            tickScanCheckin();
-            return;
-        } catch (e) {}
-    }
-    failScanCamera();
-}
-function failScanCamera() {
-    document.getElementById('scan-status').textContent = '';
-    document.getElementById('scan-error').style.display = 'block';
-}
-function tickScanCheckin() {
-    const video = document.getElementById('scan-video');
-    const cvs = document.getElementById('scan-canvas');
-    if (!video || video.readyState < 2 || video.videoWidth === 0) {
-        _scanRaf = requestAnimationFrame(tickScanCheckin);
-        return;
-    }
-    const w = video.videoWidth, h = video.videoHeight;
-    cvs.width = w; cvs.height = h;
-    const ctx = cvs.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(video, 0, 0, w, h);
-    const img = ctx.getImageData(0, 0, w, h);
-    const code = window.jsQR(img.data, w, h);
-    if (code && code.data && !_scanLock) {
-        _scanLock = true;
-        stopScanCheckin();
-        handleScanPayload(code.data);
-        return;
-    }
-    _scanRaf = requestAnimationFrame(tickScanCheckin);
-}
-async function handleScanPayload(payload) {
-    const m = /^DHD:(\d+):([0-9a-f]{16})$/.exec(String(payload || '').trim());
-    if (!m) {
-        showToast('无效的到店码，请重新扫码', 'error');
-        goStep('number');
-        return;
-    }
-    const res = await api('/checkin/scan', { method: 'POST', body: JSON.stringify({ payload }) });
-    if (!res.ok) {
-        showToast(res.error || '扫码签到失败', 'error');
-        goStep('number');
-        return;
-    }
-    currentBooking = res.booking;
-    document.getElementById('done-number').textContent = currentBooking.number;
-    goStep('done');
 }
 
 // ---------- 数字键盘 ----------
@@ -245,31 +114,6 @@ async function checkinLookup() {
         return;
     }
     currentBooking = res.booking;
-
-    // 后端返回 found: true 但 checkable: false → 号码存在但状态不允许签到
-    if (res.checkable === false) {
-        const statusMap = {
-            'kiosk':    { title: '现场取号无需签到', msg: '该号码为现场取号，请直接等候叫号大屏叫号。' },
-            'checked':  { title: '该号码已签到',  msg: '该号码已完成签到，请直接前往。' },
-            'called':   { title: '该号码已被叫号', msg: '该号码已被叫号，请前往就餐区。' },
-            'arrived':  { title: '该号码已到店',  msg: '该号码已确认到店，请前往就餐区。' },
-            'seated':   { title: '该号码正在就餐', msg: '该号码当前正在就餐，无需重复签到。' },
-            'done':     { title: '该号码已就餐完成', msg: '该号码已就餐完成，无法再次签到。' },
-            'passed':   { title: '该号码已过号',   msg: '该号码已被过号，无法再次签到，请前往服务台。' },
-            'cancelled':{ title: '该号码已取消',   msg: '该号码已取消，无法签到。' },
-            'expired':  { title: '该号码已失效',   msg: '该号码已过期，无法签到。' }
-        };
-        const info = statusMap[res.status] || { title: '该号码当前无法签到', msg: '该号码当前不允许签到，请前往服务台。' };
-        const titleEl = document.getElementById('fin-title');
-        const msgEl = document.getElementById('fin-status-msg');
-        if (titleEl) titleEl.textContent = info.title;
-        if (msgEl) msgEl.textContent = info.msg;
-        document.getElementById('fin-number').textContent = res.booking.number;
-        goStep('finished');
-        return;
-    }
-
-    // 兼容老字段（部分老逻辑可能没返回 checkable，按 checked 状态判断）
     if (res.checked) {
         document.getElementById('ad-number').textContent = res.booking.number;
         goStep('alreadydone');
@@ -388,28 +232,11 @@ async function submitKioskTake() {
     document.getElementById('tk-phone').textContent = b.phoneTail ? ('****' + b.phoneTail) : '—';
     document.getElementById('tk-people').textContent = b.people + ' 人 · 儿童 ' + b.children + ' 人';
     document.getElementById('tk-date').textContent = formatDate(b.date);
-    // 绑定二维码（在预约平台"扫一扫"认领此号码）
-    const qrCanvas = document.getElementById('tk-qr');
-    if (qrCanvas && window.qrcode && b.token && typeof b.id !== 'undefined') {
-        const qr = qrcode(0, 'M');
-        qr.addData('DHD:' + b.id + ':' + b.token);
-        qr.make();
-        const scale = 5;
-        const size = qr.getModuleCount() * scale;
-        qrCanvas.width = size;
-        qrCanvas.height = size;
-        const ctx = qrCanvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, size, size);
-        qr.renderTo2dContext(ctx, scale);
-    }
     document.getElementById('take-form').style.display = 'none';
     const result = document.getElementById('take-result');
     result.style.display = 'block';
     result.scrollIntoView({ behavior: 'smooth' });
     document.getElementById('take-phone').value = '';
-    // 启动 8 秒自动返回首页倒计时
-    startAutoHomeCountdown('take', 8);
 }
 
 function resetTake() {

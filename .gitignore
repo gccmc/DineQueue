@@ -19,3 +19,19 @@ Thumbs.db
 # 本地启动用的临时脚本
 start.bat
 cleanup_test.*
+confirm-machine.ps1
+
+# Word 文档与生成脚本
+*.docx
+~$*.docx
+gen_doc.py
+gen_docs.py
+remove_watermark.py
+
+# 临时测试文件
+public/cam-test.html
+check_momo.cjs
+server.err
+
+# 其他
+public/你真是太爱里面有什么，你并告诉我这里面有….md

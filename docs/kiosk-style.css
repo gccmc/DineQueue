@@ -392,23 +392,6 @@ button {
 }
 
 /* 取号结果号码牌 */
-/* 自动返回首页倒计时提示 */
-.auto-home-tip {
-    text-align: center;
-    color: #6b7196;
-    font-size: 13px;
-    margin-top: 18px;
-    padding: 8px 0;
-    border-top: 1px dashed rgba(0,0,0,0.08);
-}
-.auto-home-tip b {
-    color: #4a90e2;
-    font-weight: 700;
-    font-size: 16px;
-    display: inline-block;
-    min-width: 22px;
-}
-
 .take-result {
     display: flex;
     flex-direction: column;
@@ -467,62 +450,3 @@ button {
     font-weight: 600;
     letter-spacing: 1px;
 }
-.tk-bind {
-    margin-top: 20px;
-    padding: 16px;
-    background: #f4f6ff;
-    border: 1.5px dashed #c3cdf7;
-    border-radius: 16px;
-    text-align: center;
-}
-.tk-bind-title {
-    font-size: 17px;
-    font-weight: 700;
-    color: #2a2a4a;
-    margin-bottom: 12px;
-}
-.tk-bind canvas {
-    margin: 0 auto;
-    background: #fff;
-    border-radius: 12px;
-    padding: 10px;
-    box-shadow: 0 2px 12px rgba(102,126,234,0.2);
-}
-.tk-bind-hint {
-    margin: 12px auto 0;
-    max-width: 300px;
-    font-size: 12.5px;
-    color: #7c86ab;
-    line-height: 1.7;
-    text-align: center;
-}
-
-/* 扫码签到 */
-.btn-primary.outline {
-    background: transparent;
-    color: #667eea;
-    border: 2px solid #667eea;
-    box-shadow: none;
-}
-.btn-primary.wide { letter-spacing: 2px; }
-.scan-divider {
-    display: flex;
-    align-items: center;
-    color: #a0a8c8;
-    font-size: 13px;
-    margin-bottom: 14px;
-}
-.scan-divider::before,
-.scan-divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #e0e4f5;
-    margin: 0 10px;
-}
-.scan-pulse {
-    font-size: 18px;
-    color: #fff;
-    animation: k-pulse 1.6s ease-in-out infinite;
-}
-@keyframes k-pulse { 0%,100%{opacity:.45} 50%{opacity:1} }

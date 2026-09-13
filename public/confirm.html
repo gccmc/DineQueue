@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>到店确认台</title>
+    <link rel="stylesheet" href="confirm-style.css">
+</head>
+<body>
+    <div class="confirm-app">
+
+        <!-- 待机：当前叫号 + 操作 -->
+        <section id="pane-idle" class="pane active">
+            <div class="cf-header">
+                <div class="cf-logo">📍</div>
+                <h1>到店确认台</h1>
+                <p class="cf-sub">叫到您的号码后，请到本机确认到店</p>
+            </div>
+
+            <div class="called-box">
+                <div class="called-title">🔊 当前叫号</div>
+                <div id="called-list" class="called-list">
+                    <div class="called-empty">暂时没有叫号，请稍候…</div>
+                </div>
+            </div>
+
+            <div class="idle-actions">
+                <button class="act-btn primary wide" onclick="openScan()">
+                    <span class="act-icon">📷</span>
+                    <span>扫码确认到店</span>
+                </button>
+            </div>
+            <div class="cf-foot">请出示手机上预约平台保存的「到店码」</div>
+        </section>
+
+        <!-- 扫码 -->
+        <section id="pane-scan" class="pane">
+            <div class="pane-head">
+                <button class="pane-back" onclick="goIdle()">〈</button>
+                <h2>扫码确认</h2>
+                <button class="pane-back ghost" onclick="goIdle()">✕</button>
+            </div>
+            <div class="scan-body">
+                <div class="cam-wrap" style="position:relative;height:200px;display:flex;align-items:center;justify-content:center;">
+                    <video id="scan-video" playsinline muted style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;"></video>
+                    <canvas id="scan-canvas" style="display:none;"></canvas>
+                    <div class="scan-pulse">📷 正在扫描到店码…</div>
+                </div>
+                <div class="cam-status" id="cam-status">正在启动摄像头…</div>
+                <div class="cam-error" id="cam-error" style="display:none;">
+                    无法打开摄像头（需 https 或本机 localhost 环境）<br>请联系店员协助处理
+                </div>
+            </div>
+        </section>
+
+        <!-- 确认卡片 -->
+        <section id="pane-ticket" class="pane">
+            <div class="pane-head">
+                <button class="pane-back" onclick="goIdle()">〈</button>
+                <h2 id="ticket-title">确认号码</h2>
+                <button class="pane-back ghost" onclick="goIdle()">✕</button>
+            </div>
+            <div class="ticket-body">
+                <div class="big-number" id="ticket-number">000</div>
+                <div class="ticket-status" id="ticket-status"></div>
+                <div class="ticket-rows">
+                    <div class="t-row"><span>类型</span><b id="ticket-type">—</b></div>
+                    <div class="t-row"><span>人数</span><b id="ticket-people">—</b></div>
+                    <div class="t-row"><span>桌号</span><b id="ticket-table">—</b></div>
+                </div>
+                <button class="act-btn primary big" id="confirm-arrive-btn" onclick="confirmArrive()">确认，我已到店</button>
+                <button class="pane-link-btn" onclick="goIdle()">不是我的号码，返回</button>
+            </div>
+        </section>
+
+        <!-- 处理结果 -->
+        <section id="pane-result" class="pane">
+            <div class="result-body">
+                <div class="result-icon" id="result-icon">✅</div>
+                <h2 id="result-title">确认成功</h2>
+                <p class="result-msg" id="result-msg"></p>
+                <button class="act-btn primary wide" onclick="goIdle()">返回首页</button>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- 离线遮罩：后端断开时全屏锁定 -->
+    <div id="offline-overlay" class="offline-overlay" style="display:none;">
+        <div class="offline-box">
+            <div class="offline-icon">⚠️</div>
+            <h2>与服务器断开连接</h2>
+            <p>请检查网络或联系店员</p>
+            <div class="offline-pulse">正在尝试重连…</div>
+        </div>
+    </div>
+
+    <div id="toast" class="cf-toast"></div>
+    <script src="vendor/qrcode.js"></script>
+    <script src="vendor/jsQR.js"></script>
+    <script src="confirm.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</body>
+</html>
